@@ -1,12 +1,13 @@
 # Kira Surge 1 — RunPod Serverless Worker
 # =========================================
-# Uses worker-sglang base (SGLang pre-installed) + upgrades transformers
-# + adds our own RunPod handler that wraps SGLang's API.
+# Uses worker-sglang base image AS-IS (keeps its native entrypoint)
+# Only upgrades transformers and patches SGLang for Qwen3.5.
+# The base image handles SGLang startup + RunPod handler registration.
 
 FROM runpod/worker-sglang:2.0.2
 
 # Upgrade transformers for Qwen3.5 support
-RUN pip install --no-cache-dir "transformers>=5.3.0" "huggingface_hub>=0.30" "runpod>=1.7.0"
+RUN pip install --no-cache-dir "transformers>=5.3.0" "huggingface_hub>=0.30"
 
 # Fix AutoImageProcessor.register() conflict
 RUN find / -path "*/sglang/srt/configs/utils.py" -exec sed -i 's/, exist_ok=True//g' {} \; 2>/dev/null; \
@@ -26,10 +27,6 @@ RUN ROPE_FILE=$(find / -path "*/sglang/srt/layers/rotary_embedding.py" 2>/dev/nu
         echo "Patched rope_scaling"; \
     fi
 
-# Override the default entrypoint with our handler
-COPY handler.py /app/handler.py
-
 ENV SGLANG_DISABLE_CUDNN_CHECK=1
 
-# Override CMD to use our handler instead of the default worker-sglang entrypoint
-CMD ["python", "/app/handler.py"]
+# DO NOT override CMD — let the base image's native entrypoint handle everything
