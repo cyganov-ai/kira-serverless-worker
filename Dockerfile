@@ -1,6 +1,6 @@
-FROM runpod/worker-sglang:2.0.2
+FROM runpod/worker-vllm:stable-cuda12.1.0
 
-# Upgrade transformers to 5.3+ for Qwen3.5 support
-RUN pip install "transformers>=5.3.0" "huggingface_hub>=0.30" --no-cache-dir
+# Just add transformers 5.3 for Qwen3.5 support
+RUN pip install --no-cache-dir "transformers>=5.3.0" "huggingface_hub>=0.30"
 
 ENV SGLANG_DISABLE_CUDNN_CHECK=1
