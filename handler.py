@@ -1,18 +1,29 @@
 """RunPod Serverless handler for Kira Surge 1.
 
-Starts SGLang with --disable-cuda-graph for fast startup,
-then proxies requests via runpod.serverless.start().
+Starts SGLang with --disable-cuda-graph, proxies requests.
+Writes debug log to /tmp/kira_debug.log for troubleshooting.
 """
 import logging
 import os
 import subprocess
+import sys
 import time
+import traceback
 
-import requests as http_requests
-import runpod
-
-logging.basicConfig(level=logging.INFO)
+# Setup logging to both stdout and file
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+    ]
+)
 logger = logging.getLogger("kira")
+
+# Log everything to stdout so RunPod captures it
+print("=" * 60, flush=True)
+print("  KIRA HANDLER STARTING", flush=True)
+print("=" * 60, flush=True)
 
 MODEL_NAME = os.environ.get("MODEL_NAME", "cyganovroman/kira-surge-1")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
@@ -20,8 +31,30 @@ CONTEXT_LENGTH = os.environ.get("CONTEXT_LENGTH", "8192")
 DTYPE = os.environ.get("DTYPE", "bfloat16")
 PORT = 8080
 
+print(f"MODEL_NAME={MODEL_NAME}", flush=True)
+print(f"CONTEXT_LENGTH={CONTEXT_LENGTH}", flush=True)
+print(f"DTYPE={DTYPE}", flush=True)
+print(f"HF_TOKEN={'set' if HF_TOKEN else 'NOT SET'}", flush=True)
+
+# Test imports first
+try:
+    print("Testing imports...", flush=True)
+    import sglang
+    print(f"  sglang version: {sglang.__version__}", flush=True)
+    import transformers
+    print(f"  transformers version: {transformers.__version__}", flush=True)
+    import runpod
+    print(f"  runpod imported OK", flush=True)
+    print("All imports OK!", flush=True)
+except Exception as e:
+    print(f"IMPORT ERROR: {e}", flush=True)
+    traceback.print_exc()
+    sys.exit(1)
+
+import requests as http_requests
+
 def start_sglang():
-    logger.info("Starting SGLang for %s...", MODEL_NAME)
+    print("Starting SGLang server...", flush=True)
     env = os.environ.copy()
     env["HF_TOKEN"] = HF_TOKEN
     env["SGLANG_DISABLE_CUDNN_CHECK"] = "1"
@@ -38,26 +71,38 @@ def start_sglang():
         "--disable-cuda-graph",
         "--disable-radix-cache",
     ]
+    print(f"CMD: {' '.join(cmd)}", flush=True)
 
-    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    proc = subprocess.Popen(
+        cmd, env=env,
+        stdout=sys.stdout,  # Forward SGLang output to stdout
+        stderr=sys.stdout,
+    )
 
-    # Wait up to 15 min for SGLang to be ready
-    for i in range(180):
+    for i in range(180):  # 15 min max
         try:
             r = http_requests.get(f"http://localhost:{PORT}/health", timeout=3)
             if r.status_code == 200:
-                logger.info("SGLang READY after %ds", i * 5)
+                print(f"SGLang READY after {i*5}s!", flush=True)
                 return proc
         except:
             pass
         if proc.poll() is not None:
-            out = proc.stdout.read().decode()[-1000:]
-            raise RuntimeError(f"SGLang died: {out}")
+            print(f"SGLang DIED with code {proc.returncode}", flush=True)
+            sys.exit(1)
         time.sleep(5)
+        if i % 12 == 0:
+            print(f"  Waiting for SGLang... {i*5}s", flush=True)
 
-    raise RuntimeError("SGLang timeout after 15 min")
+    print("SGLang TIMEOUT after 15 min", flush=True)
+    sys.exit(1)
 
-sglang_proc = start_sglang()
+try:
+    sglang_proc = start_sglang()
+except Exception as e:
+    print(f"FATAL: {e}", flush=True)
+    traceback.print_exc()
+    sys.exit(1)
 
 def handler(job):
     try:
@@ -80,8 +125,8 @@ def handler(job):
         r.raise_for_status()
         return r.json()
     except Exception as e:
-        logger.error("Error: %s", e)
+        print(f"HANDLER ERROR: {e}", flush=True)
         return {"error": str(e)}
 
-logger.info("Starting RunPod handler")
+print("Registering with RunPod...", flush=True)
 runpod.serverless.start({"handler": handler})
