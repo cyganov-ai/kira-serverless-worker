@@ -18,3 +18,4 @@ ENV SGLANG_DISABLE_CUDNN_CHECK=1
 ENV DISABLE_CUDA_GRAPH=true
 
 CMD ["python", "/app/handler.py"]
+# Build trigger: 1774292515
